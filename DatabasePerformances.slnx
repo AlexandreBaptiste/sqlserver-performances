@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DatabasePerformances.Benchmarks/DatabasePerformances.Benchmarks.csproj" />
+    <Project Path="src/DatabasePerformances.Domain/DatabasePerformances.Domain.csproj" />
+    <Project Path="src/DatabasePerformances.Infrastructure/DatabasePerformances.Infrastructure.csproj" />
+    <Project Path="src/DatabasePerformances.Seeder/DatabasePerformances.Seeder.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DatabasePerformances.Tests/DatabasePerformances.Tests.csproj" />
+  </Folder>
+</Solution>

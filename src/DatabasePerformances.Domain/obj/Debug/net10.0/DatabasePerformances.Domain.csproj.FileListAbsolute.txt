@@ -1,0 +1,11 @@
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\bin\Debug\net10.0\DatabasePerformances.Domain.deps.json
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\bin\Debug\net10.0\DatabasePerformances.Domain.dll
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\bin\Debug\net10.0\DatabasePerformances.Domain.pdb
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\obj\Debug\net10.0\DatabasePerformances.Domain.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\obj\Debug\net10.0\DatabasePerformances.Domain.AssemblyInfoInputs.cache
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\obj\Debug\net10.0\DatabasePerformances.Domain.AssemblyInfo.cs
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\obj\Debug\net10.0\DatabasePerformances.Domain.csproj.CoreCompileInputs.cache
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\obj\Debug\net10.0\DatabasePerformances.Domain.dll
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\obj\Debug\net10.0\refint\DatabasePerformances.Domain.dll
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\obj\Debug\net10.0\DatabasePerformances.Domain.pdb
+C:\Users\albaptis\Workspace\database-performances\src\DatabasePerformances.Domain\obj\Debug\net10.0\ref\DatabasePerformances.Domain.dll
