@@ -1,0 +1,31 @@
+## .NET build outputs
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+NuGet.Config
+
+## BenchmarkDotNet artifacts
+BenchmarkDotNet.Artifacts/
+
+## Coverage
+coverage/
+*.coverage
+*.coveragexml
+TestResults/
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Rider / JetBrains
+.idea/
+
+## VS Code
+.vscode/
