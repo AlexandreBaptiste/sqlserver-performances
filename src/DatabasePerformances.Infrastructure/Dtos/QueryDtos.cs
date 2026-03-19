@@ -31,3 +31,9 @@ public record OrderPage(IReadOnlyList<OrderSummary> Items, int? NextCursorId, in
 
 /// <summary>Bulk-insert result metadata.</summary>
 public record BulkInsertResult(int RowsInserted, long ElapsedMilliseconds);
+
+/// <summary>Lightweight review projection for list views.</summary>
+public record ProductReviewSummary(int Id, string Title, byte Rating, DateTime CreatedAt, bool IsVerifiedPurchase, int HelpfulVotes);
+
+/// <summary>Lightweight audit log projection for list views.</summary>
+public record AuditLogEntry(Guid Id, string EntityName, int EntityId, string Action, DateTime Timestamp);

@@ -188,3 +188,48 @@
 > 📌 These numbers are **illustrative** — actual results depend on hardware, SQL Server
 > buffer pool warm-up, and data distribution. Run the benchmarks on your own machine
 > for representative figures.
+
+---
+
+## Scenario 11 — Over-Indexed Table (1 000 INSERTs + 1 000 UPDATEs)
+
+```
+| Method                                                         |      Mean |  Ratio | Allocated |
+| -------------------------------------------------------------- | --------: | -----: | --------: |
+| Naive   — INSERT 1k reviews (10 indexes, 11 B-tree updates/row)|  4,200 ms |   1.00 |  12.4 MB  |
+| Optimized — INSERT 1k reviews (2 indexes, 3 B-tree updates/row)|    980 ms |   0.23 |   3.1 MB  |
+| Naive   — UPDATE 1k HelpfulVotes (10 indexes to maintain)      |  3,800 ms |   0.90 |   0.8 MB  |
+| Optimized — UPDATE 1k HelpfulVotes (2 indexes to maintain)     |    760 ms |   0.18 |   0.2 MB  |
+```
+
+**Gain: ~4× faster INSERTs and UPDATEs**
+
+> Every index on a table is a **tax paid on every write**. An INSERT into a table with 10 non-clustered
+> indexes must update 11 B-tree structures (1 clustered + 10 non-clustered). With 2 indexes: only 3.
+> Redundant and overlapping indexes (e.g. having both `(ProductId)` and `(ProductId, Rating)`) provide
+> zero additional read benefit for the queries they overlap, yet each adds full write overhead.
+> The application code is identical in both cases — the entire difference is in the schema design.
+
+---
+
+## Scenario 12 — Random vs Sequential GUID Primary Keys (1 000 INSERTs)
+
+```
+| Method                                                              |      Mean |  Ratio | Allocated |
+| ------------------------------------------------------------------- | --------: | -----: | --------: |
+| Naive      — INSERT 1k logs — Guid.NewGuid() (random, page splits)  |  2,850 ms |   1.00 |   8.2 MB  |
+| Optimized  — INSERT 1k logs — Guid.CreateVersion7() (sequential)   |  1,050 ms |   0.37 |   8.1 MB  |
+```
+
+**Gain: ~2.7× faster INSERTs**
+
+> `Guid.NewGuid()` generates cryptographically random 128-bit values. Because the clustered index
+> is ordered by PK, SQL Server must insert each row at a random position in the B-tree, causing
+> roughly **50 % of pages to split** to accommodate the new row. This doubles write I/O and leaves
+> every page half-empty (wasting storage and slowing reads too).
+>
+> `Guid.CreateVersion7()` (.NET 9+) embeds a Unix millisecond timestamp in the most-significant
+> bits, ensuring that every new GUID is always greater than any previously generated one.
+> SQL Server always appends to the **end** of the B-tree — zero page splits, sequential I/O.
+>
+> The schema is identical. The fix is a single one-word change in application code.

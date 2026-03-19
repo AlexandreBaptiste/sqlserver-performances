@@ -60,6 +60,8 @@ Customer (200k) ──── (1M) Order ──── (3M) OrderItem ────
 | 8 | Bulk Insert (10k rows) | `SaveChanges` per entity — 10k round-trips | `AddRange` + `SqlBulkCopy` | 40–200× |
 | 9 | Count() vs Any() | `Count() > 0` scans all matching rows | `Any()` → `EXISTS` short-circuit at first match | 2–10× |
 | 10 | Tracking vs NoTracking | Full change-tracking + `SELECT *` on 5k rows | `AsNoTracking()` + DTO projection | 1.5–3× |
+| 11 | Over-Indexed Table | 10 redundant indexes → 11 B-tree updates per write | 2 targeted covering indexes → 3 B-tree updates per write | 2–5× |
+| 12 | Random vs Sequential GUID PK | `Guid.NewGuid()` clustered PK → page splits & fragmentation | `Guid.CreateVersion7()` → sequential inserts, no page splits | 1.5–3× |
 
 ---
 

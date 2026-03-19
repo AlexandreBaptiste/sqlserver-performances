@@ -22,6 +22,8 @@
 | 8 | [Bulk Insert](#scenario-8--bulk-insert) | SaveChanges per entity vs AddRange / SqlBulkCopy |
 | 9 | [Count() vs Any()](#scenario-9--existence-check-count-vs-any) | `Count() > 0` vs `Any()` (EXISTS) |
 | 10 | [Tracking vs NoTracking](#scenario-10--tracking-vs-notracking) | Change-tracking overhead vs `AsNoTracking` + DTO |
+| 11 | [Over-Indexed Table](#scenario-11--over-indexed-table) | 10 redundant indexes vs 2 targeted covering indexes |
+| 12 | [Random vs Sequential GUID PK](#scenario-12--random-vs-sequential-guid-pk) | `Guid.NewGuid()` page splits vs `Guid.CreateVersion7()` sequential inserts |
 
 ---
 
@@ -625,6 +627,8 @@ context.Customers.AsNoTracking()
 | `BulkInsertTests.cs` | 8 — Bulk Insert | 2 |
 | `ExistenceCheckTests.cs` | 9 — Count vs Any | 4 |
 | `TrackingTests.cs` | 10 — Tracking vs NoTracking | 3 |
+| `OverIndexedReviewTests.cs` | 11 — Over-Indexed Table | 4 |
+| `GuidKeyAuditLogTests.cs` | 12 — Random vs Sequential GUID PK | 4 |
 
 **Purpose:** Verify that naive and optimized approaches produce the **same logical result**. If an optimization changes the data, these tests catch it.
 
@@ -661,3 +665,168 @@ These provide statistically rigorous comparisons with JIT warm-up, iteration sta
 | 8 | Bulk Insert | `AddRange` / `SqlBulkCopy` | 40–200× |
 | 9 | Count vs Any | `Any()` → EXISTS short-circuit | 2–10× |
 | 10 | Tracking vs NoTracking | `AsNoTracking` + DTO projection | 1.5–3× |
+| 11 | Over-Indexed Table | Remove redundant indexes (11 → 3 B-tree updates/write) | 2–5× |
+| 12 | Random vs Sequential GUID PK | `Guid.CreateVersion7()` (time-ordered) | 1.5–3× |
+
+---
+
+## Scenario 11 — Over-Indexed Table
+
+### The Problem
+
+A `ProductReviews` table that has grown too many indexes over time — each added to
+speed up a specific read query but collectively making all writes significantly slower.
+
+### Naive Approach — `NaiveOverIndexedReviewQueries` (DbNaive – 10 indexes)
+
+```csharp
+// ❌ Application code is identical to optimized.
+// The anti-pattern is ENTIRELY in the schema: 10 non-clustered indexes.
+// Each INSERT/UPDATE/DELETE must maintain 11 B-tree structures
+// (1 clustered PK + 10 non-clustered).
+context.ProductReviews.AddRange(reviews);
+await context.SaveChangesAsync();
+```
+
+**What goes wrong:**
+
+Every non-clustered index is a separate B-tree stored alongside the data. Every
+INSERT must find the right position in **all** 10 B-trees and write a new entry.
+Several of the 10 indexes are **redundant or overlapping**:
+
+| Index | Problem |
+|-------|---------|
+| `(ProductId)` | Superseded by `(ProductId, Rating)` and `(ProductId, CreatedAt)` |
+| `(Rating)` | Only 5 distinct values — near-useless (high scan, low elimination) |
+| `(IsVerifiedPurchase)` | Only 2 distinct values — completely useless index |
+| `(ProductId, Rating)` + `(ProductId, CreatedAt)` | Overlap each other and `(ProductId)` |
+| `(Rating, IsVerifiedPurchase)` | Overlaps `(Rating)` and `(IsVerifiedPurchase)` |
+| `(Title)` | Long text key, high cardinality but rarely searched alone |
+
+### Optimized Approach — `OptimizedOverIndexedReviewQueries` (DbOptimized – 2 indexes)
+
+```csharp
+// ✅ Same application code. The optimization is the schema:
+// Only 2 targeted covering indexes — 3 total B-tree updates per write.
+
+// IX_Reviews_ProductId_Rating (ProductId, Rating DESC)
+//    INCLUDE (CustomerId, Title, CreatedAt, IsVerifiedPurchase, HelpfulVotes)
+//    → Covers: WHERE ProductId = ? AND Rating >= ? ORDER BY Rating DESC
+//
+// IX_Reviews_CustomerId_CreatedAt (CustomerId, CreatedAt DESC)
+//    INCLUDE (ProductId, Rating, Title)
+//    → Covers: WHERE CustomerId = ? ORDER BY CreatedAt DESC
+context.ProductReviews.AddRange(reviews);
+await context.SaveChangesAsync();
+```
+
+**Why it’s better:**
+
+| Aspect | Naive (10 indexes) | Optimized (2 indexes) |
+|--------|--------------------|-----------------------|
+| B-tree updates per INSERT | 11 (1 clustered + 10 NCI) | 3 (1 clustered + 2 NCI) |
+| B-tree updates per UPDATE | Up to 11 (all affected indexes) | Up to 3 |
+| Storage overhead | ~10 index pages per data page | ~2 index pages per data page |
+| Query optimizer clarity | Confused by redundant paths | Single unambiguous covering index |
+| Application code change | None needed | None needed |
+
+**Expected gain: 2×–5× faster writes**
+
+> **Key lesson:** The optimizer picks the best available index for reads regardless
+> of how many you have. But writes pay the cost for ALL indexes, used or not.
+> Removing an unused index is free read performance maintained and free write speed gained.
+
+### Tests
+
+| Test | Type | File | What It Validates |
+|------|------|------|-------------------|
+| INSERT: both tables accept the same rows | Correctness | `OverIndexedReviewTests.cs` | 20 rows seeded = 20 rows found in both DBs |
+| READ: GetTopRated returns count from both tables | Correctness | `OverIndexedReviewTests.cs` | Both tables are readable |
+| READ: all results satisfy minRating filter | Correctness | `OverIndexedReviewTests.cs` | No incorrect rows returned |
+| UPDATE: HelpfulVotes increment works on both tables | Correctness | `OverIndexedReviewTests.cs` | Same update semantics regardless of schema |
+| INSERT: properly-indexed faster than over-indexed | Performance | `PerformanceAssertionTests.cs` | Ratio guard |
+| BenchmarkDotNet: INSERT + UPDATE (4 benchmarks) | Benchmark | `OverIndexedBenchmark.cs` | Naive INSERT, Optimized INSERT, Naive UPDATE, Optimized UPDATE |
+
+---
+
+## Scenario 12 — Random vs Sequential GUID PK
+
+### The Problem
+
+All write-heavy tables that use a `UNIQUEIDENTIFIER` (GUID) clustered primary key generated
+by `Guid.NewGuid()` suffer from **clustered index fragmentation**. SQL Server stores rows in
+PK order inside the clustered B-tree. A random GUID is statistically unlikely to be the
+largest existing key, so SQL Server must:
+
+1. Find the page where the new GUID belongs (somewhere in the middle of the B-tree).
+2. If the page is full (~80% fill factor), **split it** into two half-full pages.
+3. Write the new row to the correct half.
+
+With 1 000 inserts, roughly **500 page splits** occur. Each split writes two pages instead
+of one, doubling I/O. Over time the index becomes severely fragmented.
+
+### Naive Approach — `NaiveGuidKeyQueries` (`Guid.NewGuid()`)
+
+```csharp
+// ❌ Random GUID → insert at a random position in the clustered B-tree
+//    Expected: ~50% page-split rate per INSERT batch
+var log = new AuditLog
+{
+    Id = Guid.NewGuid(),  // ❌ random: e.g. {3f7a21cb-...}
+    ...
+};
+context.AuditLogs.Add(log);
+await context.SaveChangesAsync();
+```
+
+**What goes wrong:**
+
+| Symptom | Cause |
+|---------|-------|
+| ~50 % page splits per batch | New GUID is almost never the largest |
+| Pages fill to ~50 % after splits | Each split produces two half-full pages |
+| Growing storage footprint | Fragmented pages waste disk space |
+| Query scans read twice as many pages | Reads are slower too, not just writes |
+| Fragmentation compounds over time | Without `REBUILD INDEX` it never recovers |
+
+### Optimized Approach — `OptimizedGuidKeyQueries` (`Guid.CreateVersion7()`)
+
+```csharp
+// ✅ Version 7 UUID: high bits = Unix ms timestamp → monotonically increasing
+//    New GUID is always > all previously generated GUIDs → always appends to end
+var log = new AuditLog
+{
+    Id = Guid.CreateVersion7(),  // ✅ time-ordered: e.g. {019504d8-...}
+    ...
+};
+context.AuditLogs.Add(log);
+await context.SaveChangesAsync();
+```
+
+**Why it’s better:**
+
+| Aspect | Naive (`Guid.NewGuid()`) | Optimized (`Guid.CreateVersion7()`) |
+|--------|--------------------------|--------------------------------------|
+| Page-split rate | ~50 % | ~0 % |
+| Page fill factor | ~50 % after fragmentation | ~80 % (default fill factor, maintained) |
+| Write I/O per row | 2× (split writes 2 pages) | 1× (always appends to last page) |
+| Index fragmentation over time | Accumulates → requires `REBUILD INDEX` | Negligible |
+| Global uniqueness | ✅ | ✅ (timestamp prefix + random suffix) |
+| Code change required | None | One word: `NewGuid()` → `CreateVersion7()` |
+
+**Expected gain: 1.5×–3× faster batch INSERTs; gap widens as table grows**
+
+> **Key lesson:** Never use `Guid.NewGuid()` as a clustered B-tree key for write-heavy tables.
+> If you need globally unique IDs for external APIs, use `Guid.CreateVersion7()` (time-ordered)
+> or an `INT IDENTITY` with a separate `UNIQUEIDENTIFIER` column for public exposure.
+
+### Tests
+
+| Test | Type | File | What It Validates |
+|------|------|------|-------------------|
+| INSERT: both tables accept the same rows | Correctness | `GuidKeyAuditLogTests.cs` | 20 rows seeded = 20 rows found in both DBs |
+| READ: GetRecentByEntity returns rows from both | Correctness | `GuidKeyAuditLogTests.cs` | Both tables are readable |
+| READ: retrieved entries have valid non-empty GUIDs | Correctness | `GuidKeyAuditLogTests.cs` | No zero-GUID IDs returned |
+| READ: sequential GUIDs (v7) sort chronologically | Correctness | `GuidKeyAuditLogTests.cs` | `Guid.CreateVersion7()` is monotonically increasing |
+| INSERT: sequential GUIDs faster than random GUIDs | Performance | `PerformanceAssertionTests.cs` | Ratio guard |
+| BenchmarkDotNet: INSERT (2 benchmarks) | Benchmark | `GuidKeyBenchmark.cs` | NaiveInsert (random), OptimizedInsert (sequential) |

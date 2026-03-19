@@ -114,3 +114,51 @@ public sealed class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public sealed class ProductReviewConfiguration : IEntityTypeConfiguration<ProductReview>
+{
+    public void Configure(EntityTypeBuilder<ProductReview> builder)
+    {
+        builder.ToTable("ProductReviews");
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.Title).HasMaxLength(200).IsRequired();
+        builder.Property(r => r.Body).HasMaxLength(2000).IsRequired();
+        builder.Property(r => r.CreatedAt).HasColumnType("datetime2");
+
+        // NoAction matches the SQL schema (no ON DELETE clause = NO ACTION in SQL Server)
+        builder.HasOne(r => r.Product)
+            .WithMany()
+            .HasForeignKey(r => r.ProductId)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        builder.HasOne(r => r.Customer)
+            .WithMany()
+            .HasForeignKey(r => r.CustomerId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
+{
+    public void Configure(EntityTypeBuilder<AuditLog> builder)
+    {
+        builder.ToTable("AuditLogs");
+
+        // We always set the GUID ourselves (Guid.NewGuid() or Guid.CreateVersion7()),
+        // so tell EF Core not to generate a value on add.
+        builder.HasKey(a => a.Id);
+        builder.Property(a => a.Id).ValueGeneratedNever();
+
+        builder.Property(a => a.EntityName).HasMaxLength(100).IsRequired();
+        builder.Property(a => a.Action).HasMaxLength(50).IsRequired();
+        builder.Property(a => a.OldValues).HasMaxLength(4000);
+        builder.Property(a => a.NewValues).HasMaxLength(4000);
+        builder.Property(a => a.Timestamp).HasColumnType("datetime2");
+
+        // NoAction matches the SQL schema (no ON DELETE clause)
+        builder.HasOne(a => a.ChangedBy)
+            .WithMany()
+            .HasForeignKey(a => a.ChangedByCustomerId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
